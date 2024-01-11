@@ -382,6 +382,9 @@ var (
 		LTPGainVQ1Q14,
 		LTPGainVQ2Q14,
 	}
+	LTPVqSizes = []int32{
+		10, 20, 40,
+	}
 )
 
 var (
@@ -591,4 +594,92 @@ var (
 	HarmATTQ15            = []int16{32440, 31130}
 	PLCRandAttenuateVQ15  = []int16{31130, 26214}
 	PLCRandAttenuateUVQ15 = []int16{32440, 29491}
+)
+
+var (
+	TargetRateTableNB = []int32{
+		0, 8000, 9000, 11000, 13000, 16000, 22000, MaxTargetRateBPS,
+	}
+	TargetRateTableMB = []int32{
+		0, 10000, 12000, 14000, 17000, 21000, 28000, MaxTargetRateBPS,
+	}
+	TargetRateTableWB = []int32{
+		0, 11000, 14000, 17000, 21000, 26000, 36000, MaxTargetRateBPS,
+	}
+	TargetRateTableSWB = []int32{
+		0, 13000, 16000, 19000, 25000, 32000, 46000, MaxTargetRateBPS,
+	}
+
+	SNRTableQ1 = []int32{
+		19, 31, 35, 39, 43, 47, 54, 64,
+	}
+	SNRTableOneBitPerSampleQ7 = []int32{
+		1984, 2240, 2408, 2708,
+	}
+
+	SWBDetectBHPQ13 = [][]int16{
+		{575, -948, 575}, {575, -221, 575}, {575, 104, 575},
+	}
+	SWBDetectAHPQ13 = [][]int16{
+		{14613, 6868}, {12883, 7337}, {11586, 7911},
+	}
+)
+
+var (
+	TransitionLPBQ28 = [][]int32{
+		{250767114, 501534038, 250767114},
+		{209867381, 419732057, 209867381},
+		{170987846, 341967853, 170987846},
+		{131531482, 263046905, 131531482},
+		{89306658, 178584282, 89306658},
+	}
+
+	TransitionLPAQ28 = [][]int32{
+		{506393414, 239854379},
+		{411067935, 169683996},
+		{306733530, 116694253},
+		{185807084, 77959395},
+		{35497197, 57401098},
+	}
+)
+
+var (
+	freqTableQ16 = []int16{
+		12111, 9804, 8235, 7100, 6239, 5565, 5022, 4575, 4202,
+		3885, 3612, 3375, 3167, 2984, 2820, 2674, 2542, 2422,
+		2313, 2214, 2123, 2038, 1961, 1889, 1822, 1760, 1702,
+	}
+)
+
+var (
+	cbkOffsetsStage3 = []int16{
+		(PitchESTNBCBKSStage3Max - PitchESTNBCBKSStage3Min) >> 1,
+		(PitchESTNBCBKSStage3Max - PitchESTNBCBKSStage3Mid) >> 1,
+		0,
+	}
+	cbkSizesStage3 = []int16{
+		PitchESTNBCBKSStage3Min,
+		PitchESTNBCBKSStage3Mid,
+		PitchESTNBCBKSStage3Max,
+	}
+	LagRangeStage3 = [][][]int16{
+		{
+			{-2, 6},
+			{-1, 5},
+			{-1, 5},
+			{-2, 7},
+		},
+		{
+			{-4, 8},
+			{-1, 6},
+			{-1, 6},
+			{-4, 9},
+		},
+		{
+			{-9, 12},
+			{-3, 7},
+			{-2, 7},
+			{-7, 13},
+		},
+	}
 )

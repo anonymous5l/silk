@@ -17,6 +17,14 @@ var (
 	ErrUnsupportedSamplingRate = errors.New("unsupported sampling rate")
 )
 
+var (
+	ErrEncodeSampleRateNotSupported   = errors.New("sample rate not supported")
+	ErrEncodeInputInvalidNoOfSamples  = errors.New("encode input invalid no ofs samples")
+	ErrEncodePacketSizeNotSupported   = errors.New("encode packet size not supported")
+	ErrEncodeInvalidComplexitySetting = errors.New("encode invalid complexity setting")
+	ErrEncodeInvalidLossRate          = errors.New("encode invalid loss rate")
+)
+
 func assert(b bool) {
 	if !b {
 		panic("assert")

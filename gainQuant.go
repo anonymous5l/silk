@@ -13,6 +13,6 @@ func gainsDequant(gainQ16 []int32, ind []int32, prevInd *int32, conditional int)
 			*prevInd += ind[k] + MinDeltaGainQuant
 		}
 
-		gainQ16[k] = log2lin(i32min(smulwb(InvScaleQ16, *prevInd)+Offset, 3967))
+		gainQ16[k] = log2lin(min(smulwb(InvScaleQ16, *prevInd)+Offset, 3967))
 	}
 }

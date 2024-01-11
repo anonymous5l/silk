@@ -259,75 +259,71 @@ func (d *decoderControl) init() {
 	d.LTPCoefQ14 = make([]int16, LTPOrder*NBSubFR, LTPOrder*NBSubFR)
 }
 
-type decoderState struct {
+type Decoder struct {
 	sRC                       *rangeCoderState
 	prevInvGainQ16            int32
-	sLTPQ16                   []int32
-	sLPCQ14                   []int32
-	excQ10                    []int32
-	resQ10                    []int32
-	outBuf                    []int16
+	sLTPQ16                   [2 * MaxFrameLength]int32
+	sLPCQ14                   [MaxFrameLength/NBSubFR + MaxLPCOrder]int32
+	excQ10                    [MaxFrameLength]int32
+	resQ10                    [MaxFrameLength]int32
+	outBuf                    [2 * MaxFrameLength]int16
 	lagPrev                   int32
-	LastGainIndex             int32
-	LastGainIndexEnhLayer     int32
+	_LastGainIndex            int32
+	_LastGainIndexEnhLayer    int32
 	typeOffsetPrev            int32
-	HPState                   []int32
-	HPA                       []int16
-	HPB                       []int16
+	_HPState                  [DecHPOrder]int32
+	_HPA                      []int16
+	_HPB                      []int16
 	fskHz                     int32
 	prevAPISampleRate         int32
 	frameLength               int32
 	subfrLength               int32
-	LPCOrder                  int32
-	prevNLSFQ15               []int32
+	_LPCOrder                 int32
+	prevNLSFQ15               [MaxLPCOrder]int32
 	firstFrameAfterReset      int
 	nBytesLeft                int32
 	nFramesDecoded            int
 	nFramesInPacket           int
 	moreInternalDecoderFrames int
-	FrameTermination          int32
+	_FrameTermination         int32
 	psNLSFCB                  [2]NLSFCB
 	vadFlag                   int32
 	noFECCounter              int32
 	inBandFECOffset           int32
-	sCNG                      *CNG
+	sCNG                      CNG
 	lossCnt                   int32
 	prevSigType               int32
-	sPLC                      *PLC
+	sPLC                      PLC
 }
 
-func (s *decoderState) init() {
-	s.sLTPQ16 = make([]int32, 2*MaxFrameLength, 2*MaxFrameLength)
-	s.sLPCQ14 = make([]int32, MaxFrameLength/NBSubFR+MaxLPCOrder, MaxFrameLength/NBSubFR+MaxLPCOrder)
-	s.excQ10 = make([]int32, MaxFrameLength, MaxFrameLength)
-	s.resQ10 = make([]int32, MaxFrameLength, MaxFrameLength)
-	s.outBuf = make([]int16, 2*MaxFrameLength, 2*MaxFrameLength)
-	s.HPState = make([]int32, DecHPOrder, DecHPOrder)
-	s.prevNLSFQ15 = make([]int32, MaxLPCOrder, MaxLPCOrder)
-	s.sCNG = &CNG{}
-	s.sCNG.init()
-	s.sPLC = &PLC{}
-	s.sPLC.init()
-}
-
-func (s *decoderState) CNGReset() {
-	NLSFStepQ15 := math.MaxInt16 / (s.LPCOrder + 1)
-	NLSFAccQ15 := int32(0)
-	s.sCNG.smthNLSFQ15 = make([]int32, MaxLPCOrder)
-	for i := int32(0); i < s.LPCOrder; i++ {
-		NLSFAccQ15 += NLSFStepQ15
-		s.sCNG.smthNLSFQ15[i] = NLSFAccQ15
+func (d *Decoder) init() error {
+	if err := d.setFs(24); err != nil {
+		return err
 	}
-	s.sCNG.smthGainQ16 = 0
-	s.sCNG.randSeed = 0x307880
+
+	d.firstFrameAfterReset = 1
+	d.prevInvGainQ16 = 0x10000
+
+	d._CNGReset()
+	d._PLCReset()
+
+	return nil
 }
 
-func (s *decoderState) PLCReset() {
-	s.sPLC.pitchLQ8 = s.frameLength >> 1
+func (d *Decoder) _CNGReset() {
+	NLSFStepQ15 := math.MaxInt16 / (d._LPCOrder + 1)
+	NLSFAccQ15 := int32(0)
+	memset(d.sCNG.smthNLSFQ15[:], 0, MaxLPCOrder)
+	for i := int32(0); i < d._LPCOrder; i++ {
+		NLSFAccQ15 += NLSFStepQ15
+		d.sCNG.smthNLSFQ15[i] = NLSFAccQ15
+	}
+	d.sCNG.smthGainQ16 = 0
+	d.sCNG.randSeed = 0x307880
 }
 
-type Decoder struct {
-	state *decoderState
+func (d *Decoder) _PLCReset() {
+	d.sPLC.pitchLQ8 = d.frameLength >> 1
 }
 
 func NewDecoder() (*Decoder, error) {
@@ -342,66 +338,49 @@ func NewDecoder() (*Decoder, error) {
 }
 
 func (d *Decoder) setFs(fskHz int32) error {
-	if d.state.fskHz != fskHz {
-		d.state.fskHz = fskHz
-		d.state.frameLength = smulbb(FrameLengthMS, fskHz)
-		d.state.subfrLength = smulbb(FrameLengthMS/NBSubFR, fskHz)
+	if d.fskHz != fskHz {
+		d.fskHz = fskHz
+		d.frameLength = smulbb(FrameLengthMS, fskHz)
+		d.subfrLength = smulbb(FrameLengthMS/NBSubFR, fskHz)
 
-		if d.state.fskHz == 8 {
-			d.state.LPCOrder = MinLPCOrder
-			d.state.psNLSFCB[0] = NLSFCB010
-			d.state.psNLSFCB[1] = NLSFCB110
+		if d.fskHz == 8 {
+			d._LPCOrder = MinLPCOrder
+			d.psNLSFCB[0] = NLSFCB010
+			d.psNLSFCB[1] = NLSFCB110
 		} else {
-			d.state.LPCOrder = MaxLPCOrder
-			d.state.psNLSFCB[0] = NLSFCB016
-			d.state.psNLSFCB[1] = NLSFCB116
+			d._LPCOrder = MaxLPCOrder
+			d.psNLSFCB[0] = NLSFCB016
+			d.psNLSFCB[1] = NLSFCB116
 		}
 
-		memset(d.state.sLPCQ14, 0, MaxLPCOrder)
-		memset(d.state.outBuf, 0, MaxFrameLength)
-		memset(d.state.prevNLSFQ15, 0, MaxLPCOrder)
+		memset(d.sLPCQ14[:], 0, MaxLPCOrder)
+		memset(d.outBuf[:], 0, MaxFrameLength)
+		memset(d.prevNLSFQ15[:], 0, MaxLPCOrder)
 
-		d.state.lagPrev = 100
-		d.state.LastGainIndex = 1
-		d.state.prevSigType = 0
-		d.state.firstFrameAfterReset = 1
+		d.lagPrev = 100
+		d._LastGainIndex = 1
+		d.prevSigType = 0
+		d.firstFrameAfterReset = 1
 
 		switch fskHz {
 		case 24:
-			d.state.HPA = DecodeAHP24
-			d.state.HPB = DecodeBHP24
+			d._HPA = DecodeAHP24
+			d._HPB = DecodeBHP24
 		case 16:
-			d.state.HPA = DecodeAHP16
-			d.state.HPB = DecodeBHP16
+			d._HPA = DecodeAHP16
+			d._HPB = DecodeBHP16
 		case 12:
-			d.state.HPA = DecodeAHP12
-			d.state.HPB = DecodeBHP12
+			d._HPA = DecodeAHP12
+			d._HPB = DecodeBHP12
 		case 8:
-			d.state.HPA = DecodeAHP8
-			d.state.HPB = DecodeBHP8
+			d._HPA = DecodeAHP8
+			d._HPB = DecodeBHP8
 		default:
 			return ErrUnsupportedSamplingRate
 		}
 	}
 
-	assert(d.state.frameLength > 0 && d.state.frameLength <= MaxFrameLength)
-	return nil
-}
-
-func (d *Decoder) init() error {
-	d.state = &decoderState{}
-	d.state.init()
-
-	if err := d.setFs(24); err != nil {
-		return err
-	}
-
-	d.state.firstFrameAfterReset = 1
-	d.state.prevInvGainQ16 = 0x10000
-
-	d.state.CNGReset()
-	d.state.PLCReset()
-
+	assert(d.frameLength > 0 && d.frameLength <= MaxFrameLength)
 	return nil
 }
 
@@ -415,9 +394,9 @@ func (d *Decoder) decodeParameters(psDecCtrl *decoderControl, q []int32, fullDec
 	pNLSF0Q15 := make([]int32, MaxLPCOrder, MaxLPCOrder)
 	Ixs := make([]int32, NBSubFR, NBSubFR)
 
-	psRC := d.state.sRC
+	psRC := d.sRC
 
-	if d.state.nFramesDecoded == 0 {
+	if d.nFramesDecoded == 0 {
 		if Ix, err = psRC.rangeDecoder(SamplingRatesCDF, SamplingRatesOffset); err != nil {
 			return
 		}
@@ -433,12 +412,12 @@ func (d *Decoder) decodeParameters(psDecCtrl *decoderControl, q []int32, fullDec
 		}
 	}
 
-	if d.state.nFramesDecoded == 0 {
+	if d.nFramesDecoded == 0 {
 		if Ix, err = psRC.rangeDecoder(TypeOffsetCDF, TypeOffsetCDFOffset); err != nil {
 			return
 		}
 	} else {
-		if Ix, err = psRC.rangeDecoder(TypeOffsetJointCDF[d.state.typeOffsetPrev],
+		if Ix, err = psRC.rangeDecoder(TypeOffsetJointCDF[d.typeOffsetPrev],
 			TypeOffsetCDFOffset); err != nil {
 			return
 		}
@@ -446,9 +425,9 @@ func (d *Decoder) decodeParameters(psDecCtrl *decoderControl, q []int32, fullDec
 
 	psDecCtrl.sigType = rshift(Ix, 1)
 	psDecCtrl.QuantOffsetType = Ix & 1
-	d.state.typeOffsetPrev = Ix
+	d.typeOffsetPrev = Ix
 
-	if d.state.nFramesDecoded == 0 {
+	if d.nFramesDecoded == 0 {
 		if gainsIndices[0], err = psRC.rangeDecoder(GainCDF[psDecCtrl.sigType], GainCDFOffset); err != nil {
 			return
 		}
@@ -464,55 +443,55 @@ func (d *Decoder) decodeParameters(psDecCtrl *decoderControl, q []int32, fullDec
 		}
 	}
 
-	gainsDequant(psDecCtrl.GainsQ16, gainsIndices, &d.state.LastGainIndex, d.state.nFramesDecoded)
+	gainsDequant(psDecCtrl.GainsQ16, gainsIndices, &d._LastGainIndex, d.nFramesDecoded)
 
-	psNLSFCB = &d.state.psNLSFCB[psDecCtrl.sigType]
+	psNLSFCB = &d.psNLSFCB[psDecCtrl.sigType]
 
 	if err = psRC.rangeDecoderMulti(psNLSFCB.StartPtr, psNLSFCB.MiddleIx,
 		NLSFIndices, int(psNLSFCB.nStages)); err != nil {
 		return
 	}
 
-	psNLSFCB.MSVQDecode(pNLSFQ15, NLSFIndices, d.state.LPCOrder)
+	psNLSFCB.MSVQDecode(pNLSFQ15, NLSFIndices, d._LPCOrder)
 
 	if psDecCtrl.NLSFInterpCoefQ2, err = psRC.rangeDecoder(
 		NLSFInterpolationFactorCDF, NLSFInterpolationFactorOffset); err != nil {
 		return
 	}
 
-	if d.state.firstFrameAfterReset == 1 {
+	if d.firstFrameAfterReset == 1 {
 		psDecCtrl.NLSFInterpCoefQ2 = 4
 	}
 
 	if fullDecoding {
-		_NLSF2AStable(psDecCtrl.PredCoefQ12[1], pNLSFQ15, d.state.LPCOrder)
+		_NLSF2AStable(psDecCtrl.PredCoefQ12[1], pNLSFQ15, d._LPCOrder)
 
 		if psDecCtrl.NLSFInterpCoefQ2 < 4 {
-			for i := int32(0); i < d.state.LPCOrder; i++ {
-				pNLSF0Q15[i] = d.state.prevNLSFQ15[i] +
-					rshift(mul(psDecCtrl.NLSFInterpCoefQ2, pNLSFQ15[i]-d.state.prevNLSFQ15[i]), 2)
+			for i := int32(0); i < d._LPCOrder; i++ {
+				pNLSF0Q15[i] = d.prevNLSFQ15[i] +
+					rshift(mul(psDecCtrl.NLSFInterpCoefQ2, pNLSFQ15[i]-d.prevNLSFQ15[i]), 2)
 			}
-			_NLSF2AStable(psDecCtrl.PredCoefQ12[0], pNLSF0Q15, d.state.LPCOrder)
+			_NLSF2AStable(psDecCtrl.PredCoefQ12[0], pNLSF0Q15, d._LPCOrder)
 		} else {
-			for i := int32(0); i < d.state.LPCOrder; i++ {
+			for i := int32(0); i < d._LPCOrder; i++ {
 				psDecCtrl.PredCoefQ12[0][i] = psDecCtrl.PredCoefQ12[1][i]
 			}
 		}
 	}
 
-	for i := int32(0); i < d.state.LPCOrder; i++ {
-		d.state.prevNLSFQ15[i] = pNLSFQ15[i]
+	for i := int32(0); i < d._LPCOrder; i++ {
+		d.prevNLSFQ15[i] = pNLSFQ15[i]
 	}
 
-	if d.state.lossCnt > 0 {
-		bwexpander(psDecCtrl.PredCoefQ12[0], d.state.LPCOrder, BWEAfterLossQ16)
-		bwexpander(psDecCtrl.PredCoefQ12[1], d.state.LPCOrder, BWEAfterLossQ16)
+	if d.lossCnt > 0 {
+		bwexpander(psDecCtrl.PredCoefQ12[0], d._LPCOrder, BWEAfterLossQ16)
+		bwexpander(psDecCtrl.PredCoefQ12[1], d._LPCOrder, BWEAfterLossQ16)
 	}
 
 	var cbkPtrQ14 []int16
 
 	if psDecCtrl.sigType == SIGTypeVoiced {
-		switch d.state.fskHz {
+		switch d.fskHz {
 		case 8:
 			if Ixs[0], err = psRC.rangeDecoder(PitchLagNBCDF, PitchLagNBCDFOffset); err != nil {
 				return
@@ -531,7 +510,7 @@ func (d *Decoder) decodeParameters(psDecCtrl *decoderControl, q []int32, fullDec
 			}
 		}
 
-		if d.state.fskHz == 8 {
+		if d.fskHz == 8 {
 			if Ixs[1], err = psRC.rangeDecoder(PitchContourNBCDF, PitchContourNBCDFOffset); err != nil {
 				return
 			}
@@ -541,7 +520,7 @@ func (d *Decoder) decodeParameters(psDecCtrl *decoderControl, q []int32, fullDec
 			}
 		}
 
-		decodePitch(Ixs[0], Ixs[1], psDecCtrl.pitchL, d.state.fskHz)
+		decodePitch(Ixs[0], Ixs[1], psDecCtrl.pitchL, d.fskHz)
 
 		if psDecCtrl.PERIndex, err = psRC.rangeDecoder(LTPPerIndexCDF, LTPPerIndexCDFOffset); err != nil {
 			return
@@ -578,27 +557,27 @@ func (d *Decoder) decodeParameters(psDecCtrl *decoderControl, q []int32, fullDec
 	}
 	psDecCtrl.Seed = Ix
 
-	if err = d.decodePulses(psDecCtrl, q, d.state.frameLength); err != nil {
+	if err = d.decodePulses(psDecCtrl, q, d.frameLength); err != nil {
 		return
 	}
 
-	if d.state.vadFlag, err = psRC.rangeDecoder(VadFlagCDF, VadFlagOffset); err != nil {
+	if d.vadFlag, err = psRC.rangeDecoder(VadFlagCDF, VadFlagOffset); err != nil {
 		return
 	}
 
-	if d.state.FrameTermination, err = psRC.rangeDecoder(FrameTerminationCDF, FrameTerminationOffset); err != nil {
+	if d._FrameTermination, err = psRC.rangeDecoder(FrameTerminationCDF, FrameTerminationOffset); err != nil {
 		return
 	}
 
 	var nBytesUsed int32
 
 	psRC.rangeCoderGetLength(&nBytesUsed)
-	d.state.nBytesLeft = int32(len(psRC.buffer)) - nBytesUsed
-	if d.state.nBytesLeft < 0 {
+	d.nBytesLeft = int32(len(psRC.buffer)) - nBytesUsed
+	if d.nBytesLeft < 0 {
 		return ErrRangeCoderReadBeyondBuffer
 	}
 
-	if d.state.nBytesLeft == 0 {
+	if d.nBytesLeft == 0 {
 		if err = psRC.rangeCoderCheckAfterDecoding(); err != nil {
 			return
 		}
@@ -608,7 +587,7 @@ func (d *Decoder) decodeParameters(psDecCtrl *decoderControl, q []int32, fullDec
 }
 
 func (d *Decoder) decodePulses(psDecCtrl *decoderControl, q []int32, frameLength int32) (err error) {
-	psRC := d.state.sRC
+	psRC := d.sRC
 
 	if psDecCtrl.RateLevelIndex, err = psRC.rangeDecoder(RateLevelsCDF[psDecCtrl.sigType], RateLevelsCDFOffset); err != nil {
 		return
@@ -672,7 +651,7 @@ func (d *Decoder) decodePulses(psDecCtrl *decoderControl, q []int32, frameLength
 }
 
 func (d *Decoder) decodeCore(psDecCtrl *decoderControl, xq []int16, q []int32) (err error) {
-	assert(d.state.prevInvGainQ16 != 0)
+	assert(d.prevInvGainQ16 != 0)
 
 	NLSFInterpolationFlag := int32(0)
 
@@ -687,20 +666,20 @@ func (d *Decoder) decodeCore(psDecCtrl *decoderControl, xq []int16, q []int32) (
 	var dither int32
 
 	randSeed := psDecCtrl.Seed
-	for i := int32(0); i < d.state.frameLength; i++ {
+	for i := int32(0); i < d.frameLength; i++ {
 		randSeed = rand(randSeed)
 		dither = rshift(randSeed, 31)
 
-		d.state.excQ10[i] = lshift(q[i], 10) + offsetQ10
-		d.state.excQ10[i] = (d.state.excQ10[i] ^ dither) - dither
+		d.excQ10[i] = lshift(q[i], 10) + offsetQ10
+		d.excQ10[i] = (d.excQ10[i] ^ dither) - dither
 
 		randSeed += q[i]
 	}
 
-	pexcQ10 := d.state.excQ10
-	presQ10 := d.state.resQ10
-	pxq := d.state.outBuf[d.state.frameLength:]
-	sLTPBufIdx := d.state.frameLength
+	pexcQ10 := d.excQ10[:]
+	presQ10 := d.resQ10[:]
+	pxq := d.outBuf[d.frameLength:]
+	sLTPBufIdx := d.frameLength
 
 	var (
 		BQ14, AQ12                      []int16
@@ -719,7 +698,7 @@ func (d *Decoder) decodeCore(psDecCtrl *decoderControl, xq []int16, q []int32) (
 	for k := int32(0); k < NBSubFR; k++ {
 		AQ12 = psDecCtrl.PredCoefQ12[k>>1]
 
-		for c := int32(0); c < d.state.LPCOrder; c++ {
+		for c := int32(0); c < d._LPCOrder; c++ {
 			AQ12Tmp[c] = AQ12[c]
 		}
 
@@ -727,32 +706,32 @@ func (d *Decoder) decodeCore(psDecCtrl *decoderControl, xq []int16, q []int32) (
 		GainQ16 = psDecCtrl.GainsQ16[k]
 		sigType = psDecCtrl.sigType
 
-		invGainQ16 = inverse32varQ(i32max(GainQ16, 1), 32)
-		invGainQ16 = i32min(invGainQ16, math.MaxInt16)
+		invGainQ16 = inverse32varQ(max(GainQ16, 1), 32)
+		invGainQ16 = min(invGainQ16, math.MaxInt16)
 
 		gainAdjQ16 = 1 << 16
-		if invGainQ16 != d.state.prevInvGainQ16 {
-			gainAdjQ16 = div32varQ(invGainQ16, d.state.prevInvGainQ16, 16)
+		if invGainQ16 != d.prevInvGainQ16 {
+			gainAdjQ16 = div32varQ(invGainQ16, d.prevInvGainQ16, 16)
 		}
 
-		if d.state.lossCnt > 0 && d.state.prevSigType == SIGTypeVoiced &&
+		if d.lossCnt > 0 && d.prevSigType == SIGTypeVoiced &&
 			psDecCtrl.sigType == SIGTypeUnvoiced && k < (NBSubFR>>1) {
 			memset(BQ14, 0, LTPOrder)
 			BQ14[LTPOrder/2] = 1 << 12
 			sigType = SIGTypeVoiced
-			psDecCtrl.pitchL[k] = d.state.lagPrev
+			psDecCtrl.pitchL[k] = d.lagPrev
 		}
 
 		if sigType == SIGTypeVoiced {
 			lag = psDecCtrl.pitchL[k]
 
 			if (k & (3 - lshift(NLSFInterpolationFlag, 1))) == 0 {
-				startIdx = d.state.frameLength - lag - d.state.LPCOrder - LTPOrder/2
+				startIdx = d.frameLength - lag - d._LPCOrder - LTPOrder/2
 				assert(startIdx >= 0)
-				assert(startIdx <= d.state.frameLength-d.state.LPCOrder)
+				assert(startIdx <= d.frameLength-d._LPCOrder)
 
-				_MAPrediction(d.state.outBuf[startIdx+k*(d.state.frameLength>>2):],
-					AQ12, FiltState, sLTP[startIdx:], d.state.frameLength-startIdx, d.state.LPCOrder)
+				_MAPrediction(d.outBuf[startIdx+k*(d.frameLength>>2):],
+					AQ12, FiltState, sLTP[startIdx:], d.frameLength-startIdx, d._LPCOrder)
 
 				invGainQ32 = lshift(invGainQ16, 16)
 				if k == 0 {
@@ -760,30 +739,30 @@ func (d *Decoder) decodeCore(psDecCtrl *decoderControl, xq []int16, q []int32) (
 				}
 
 				for i := int32(0); i < lag+(LTPOrder/2); i++ {
-					d.state.sLTPQ16[sLTPBufIdx-i-1] = smulwb(invGainQ32, int32(sLTP[d.state.frameLength-i-1]))
+					d.sLTPQ16[sLTPBufIdx-i-1] = smulwb(invGainQ32, int32(sLTP[d.frameLength-i-1]))
 				}
 
 			} else {
 				if gainAdjQ16 != 1<<16 {
 					for i := int32(0); i < lag+LTPOrder/2; i++ {
-						d.state.sLTPQ16[sLTPBufIdx-i-1] = smulww(gainAdjQ16, d.state.sLTPQ16[sLTPBufIdx-i-1])
+						d.sLTPQ16[sLTPBufIdx-i-1] = smulww(gainAdjQ16, d.sLTPQ16[sLTPBufIdx-i-1])
 					}
 				}
 			}
 		}
 
 		for i := 0; i < MaxLPCOrder; i++ {
-			d.state.sLPCQ14[i] = smulww(gainAdjQ16, d.state.sLPCQ14[i])
+			d.sLPCQ14[i] = smulww(gainAdjQ16, d.sLPCQ14[i])
 		}
 
 		assert(invGainQ16 != 0)
 
-		d.state.prevInvGainQ16 = invGainQ16
+		d.prevInvGainQ16 = invGainQ16
 
 		if sigType == SIGTypeVoiced {
-			predLagPtr = d.state.sLTPQ16[(sLTPBufIdx-lag+LTPOrder/2)-4:]
+			predLagPtr = d.sLTPQ16[(sLTPBufIdx-lag+LTPOrder/2)-4:]
 
-			for i := int32(0); i < d.state.subfrLength; i++ {
+			for i := int32(0); i < d.subfrLength; i++ {
 				LTPPredQ14 = smulwb(predLagPtr[4], int32(BQ14[0]))
 				LTPPredQ14 = smlawb(LTPPredQ14, predLagPtr[3], int32(BQ14[1]))
 				LTPPredQ14 = smlawb(LTPPredQ14, predLagPtr[2], int32(BQ14[2]))
@@ -794,28 +773,28 @@ func (d *Decoder) decodeCore(psDecCtrl *decoderControl, xq []int16, q []int32) (
 
 				presQ10[i] = pexcQ10[i] + rrshift(LTPPredQ14, 4)
 
-				d.state.sLTPQ16[sLTPBufIdx] = lshift(presQ10[i], 6)
+				d.sLTPQ16[sLTPBufIdx] = lshift(presQ10[i], 6)
 
 				sLTPBufIdx++
 			}
 		} else {
-			memcpy(presQ10, pexcQ10, int(d.state.subfrLength))
+			memcpy(presQ10[:], pexcQ10[:], int(d.subfrLength))
 		}
 
-		decodeShortTermPrediction(vecQ10, presQ10, d.state.sLPCQ14, AQ12Tmp, d.state.LPCOrder, d.state.subfrLength)
+		decodeShortTermPrediction(vecQ10, presQ10[:], d.sLPCQ14[:], AQ12Tmp, d._LPCOrder, d.subfrLength)
 
-		for i := int32(0); i < d.state.subfrLength; i++ {
+		for i := int32(0); i < d.subfrLength; i++ {
 			pxq[i] = sat16(rrshift(smulww(vecQ10[i], GainQ16), 10))
 		}
 
-		memcpy(d.state.sLPCQ14, d.state.sLPCQ14[d.state.subfrLength:], MaxLPCOrder)
+		memcpy(d.sLPCQ14[:], d.sLPCQ14[d.subfrLength:], MaxLPCOrder)
 
-		pexcQ10 = pexcQ10[d.state.subfrLength:]
-		presQ10 = presQ10[d.state.subfrLength:]
-		pxq = pxq[d.state.subfrLength:]
+		pexcQ10 = pexcQ10[d.subfrLength:]
+		presQ10 = presQ10[d.subfrLength:]
+		pxq = pxq[d.subfrLength:]
 	}
 
-	memcpy(xq, d.state.outBuf[d.state.frameLength:], int(d.state.frameLength))
+	memcpy(xq, d.outBuf[d.frameLength:], int(d.frameLength))
 
 	return
 }
@@ -824,17 +803,17 @@ func (d *Decoder) decodeFrame(pOut []int16, pN *int16, pCode []byte, lost bool) 
 	sDecCtrl := &decoderControl{}
 	sDecCtrl.init()
 
-	L, fsKhzOld := d.state.frameLength, int32(0)
+	L, fsKhzOld := d.frameLength, int32(0)
 	Pulses := make([]int32, MaxFrameLength, MaxFrameLength)
 
 	sDecCtrl.LTPScaleQ14 = 0
 	assert(L > 0 && L <= MaxFrameLength)
 
 	if !lost {
-		fsKhzOld = d.state.fskHz
+		fsKhzOld = d.fskHz
 
-		if d.state.nFramesDecoded == 0 {
-			if d.state.sRC, err = newRangeCoderState(pCode); err != nil {
+		if d.nFramesDecoded == 0 {
+			if d.sRC, err = newRangeCoderState(pCode); err != nil {
 				return
 			}
 		}
@@ -846,70 +825,70 @@ func (d *Decoder) decodeFrame(pOut []int16, pN *int16, pCode []byte, lost bool) 
 				return
 			}
 
-			decBytes = len(d.state.sRC.buffer)
+			decBytes = len(d.sRC.buffer)
 		} else {
-			decBytes = len(d.state.sRC.buffer) - int(d.state.nBytesLeft)
-			d.state.nFramesDecoded++
+			decBytes = len(d.sRC.buffer) - int(d.nBytesLeft)
+			d.nFramesDecoded++
 
-			L = d.state.frameLength
+			L = d.frameLength
 
 			if err = d.decodeCore(sDecCtrl, pOut, Pulses); err != nil {
 				return
 			}
 
-			d.state.PLC(sDecCtrl, pOut, L, lost)
+			d._PLC(sDecCtrl, pOut, L, lost)
 
-			d.state.lossCnt = 0
-			d.state.prevSigType = sDecCtrl.sigType
+			d.lossCnt = 0
+			d.prevSigType = sDecCtrl.sigType
 
-			d.state.firstFrameAfterReset = 0
+			d.firstFrameAfterReset = 0
 		}
 	}
 
 	if lost {
-		d.state.PLC(sDecCtrl, pOut, L, lost)
+		d._PLC(sDecCtrl, pOut, L, lost)
 	}
 
-	memcpy(d.state.outBuf, pOut, int(L))
+	memcpy(d.outBuf[:], pOut, int(L))
 
-	d.state.PLCGlueFrames(sDecCtrl, pOut, L)
+	d._PLCGlueFrames(sDecCtrl, pOut, L)
 
-	if err = d.state.CNG(sDecCtrl, pOut, L); err != nil {
+	if err = d._CNG(sDecCtrl, pOut, L); err != nil {
 		return
 	}
 
-	assert(d.state.fskHz == 12 && (L%3) == 0 ||
-		d.state.fskHz != 12 && (L%2) == 0)
+	assert(d.fskHz == 12 && (L%3) == 0 ||
+		d.fskHz != 12 && (L%2) == 0)
 
-	biquad(pOut, d.state.HPB, d.state.HPA, d.state.HPState, pOut, L)
+	biquad(pOut, d._HPB, d._HPA, d._HPState[:], pOut, L)
 
 	*pN = int16(L)
 
-	d.state.lagPrev = sDecCtrl.pitchL[NBSubFR-1]
+	d.lagPrev = sDecCtrl.pitchL[NBSubFR-1]
 
 	return
 }
 
 func (d *Decoder) KHz() int {
-	if d.state != nil && d.state.nFramesDecoded > 0 {
-		return int(d.state.fskHz) * 1000
+	if d.nFramesDecoded > 0 {
+		return int(d.fskHz) * 1000
 	}
 	return 0
 }
 
 func (d *Decoder) LossCount() int {
-	if d.state != nil && d.state.nFramesDecoded > 0 {
-		return int(d.state.lossCnt)
+	if d.nFramesDecoded > 0 {
+		return int(d.lossCnt)
 	}
 	return 0
 }
 
 func (d *Decoder) Decode(lost bool, payload []byte) (out []int16, err error) {
-	if d.state.moreInternalDecoderFrames == 0 {
-		d.state.nFramesDecoded = 0
+	if d.moreInternalDecoderFrames == 0 {
+		d.nFramesDecoded = 0
 	}
 
-	if d.state.moreInternalDecoderFrames == 0 &&
+	if d.moreInternalDecoderFrames == 0 &&
 		!lost && len(payload) > MaxArithmBytes {
 		lost = true
 		err = ErrRangeCodeDecodePayloadTooLarge
@@ -927,24 +906,24 @@ func (d *Decoder) Decode(lost bool, payload []byte) (out []int16, err error) {
 	}
 
 	if usedBytes > 0 {
-		if d.state.nBytesLeft > 0 && d.state.FrameTermination == MoreFrames && d.state.nFramesDecoded < 5 {
-			d.state.moreInternalDecoderFrames = 1
+		if d.nBytesLeft > 0 && d._FrameTermination == MoreFrames && d.nFramesDecoded < 5 {
+			d.moreInternalDecoderFrames = 1
 		} else {
-			d.state.moreInternalDecoderFrames = 0
-			d.state.nFramesInPacket = d.state.nFramesDecoded
+			d.moreInternalDecoderFrames = 0
+			d.nFramesInPacket = d.nFramesDecoded
 
-			if d.state.vadFlag == VoiceActivity {
-				if d.state.FrameTermination == LastFrame {
-					d.state.noFECCounter++
-					if d.state.noFECCounter > NoLBRRRhres {
-						d.state.inBandFECOffset = 0
+			if d.vadFlag == VoiceActivity {
+				if d._FrameTermination == LastFrame {
+					d.noFECCounter++
+					if d.noFECCounter > NoLBRRRhres {
+						d.inBandFECOffset = 0
 					}
-				} else if d.state.FrameTermination == LBRRVer1 {
-					d.state.inBandFECOffset = 1
-					d.state.noFECCounter = 0
-				} else if d.state.FrameTermination == LBRRVer2 {
-					d.state.inBandFECOffset = 2
-					d.state.noFECCounter = 0
+				} else if d._FrameTermination == LBRRVer1 {
+					d.inBandFECOffset = 1
+					d.noFECCounter = 0
+				} else if d._FrameTermination == LBRRVer2 {
+					d.inBandFECOffset = 2
+					d.noFECCounter = 0
 				}
 			}
 		}
@@ -1039,25 +1018,6 @@ func decodeShortTermPrediction(vecQ10 []int32, presQ10 []int32, sLPCQ14 []int32,
 			sLPCQ14[MaxLPCOrder+i] = lshift(vecQ10[i], 4)
 		}
 	}
-
-	//for i := int32(0); i < subfrLength; i++ {
-	//	LPCPredQ10 := smulwb(sLPCQ14[MaxLPCOrder+i-1], int32(AQ12Tmp[0]))
-	//	LPCPredQ10 = smlawb(LPCPredQ10, sLPCQ14[MaxLPCOrder+i-2], int32(AQ12Tmp[1]))
-	//	LPCPredQ10 = smlawb(LPCPredQ10, sLPCQ14[MaxLPCOrder+i-3], int32(AQ12Tmp[2]))
-	//	LPCPredQ10 = smlawb(LPCPredQ10, sLPCQ14[MaxLPCOrder+i-4], int32(AQ12Tmp[3]))
-	//	LPCPredQ10 = smlawb(LPCPredQ10, sLPCQ14[MaxLPCOrder+i-5], int32(AQ12Tmp[4]))
-	//	LPCPredQ10 = smlawb(LPCPredQ10, sLPCQ14[MaxLPCOrder+i-6], int32(AQ12Tmp[5]))
-	//	LPCPredQ10 = smlawb(LPCPredQ10, sLPCQ14[MaxLPCOrder+i-7], int32(AQ12Tmp[6]))
-	//	LPCPredQ10 = smlawb(LPCPredQ10, sLPCQ14[MaxLPCOrder+i-8], int32(AQ12Tmp[7]))
-	//	LPCPredQ10 = smlawb(LPCPredQ10, sLPCQ14[MaxLPCOrder+i-9], int32(AQ12Tmp[8]))
-	//	LPCPredQ10 = smlawb(LPCPredQ10, sLPCQ14[MaxLPCOrder+i-10], int32(AQ12Tmp[9]))
-	//	for j := int32(10); j < LPCOrder; j++ {
-	//		LPCPredQ10 = smlawb(LPCPredQ10, sLPCQ14[MaxLPCOrder+i-j-1], int32(AQ12Tmp[j]))
-	//	}
-	//
-	//	vecQ10[i] = presQ10[i] + LPCPredQ10
-	//	sLPCQ14[MaxLPCOrder+i] = vecQ10[i] << 4
-	//}
 }
 
 func decodePitch(lagIndex int32, contourIndex int32, pitchLags []int32, fskHz int32) {

@@ -76,16 +76,16 @@ func (n *NLSFCB) Stabilize(NLSFQ15 []int32, L int32) {
 
 	insertionSortIncreasingAllValues(NLSFQ15, L)
 
-	NLSFQ15[0] = i32max(NLSFQ15[0], n.NDeltaMinQ15[0])
+	NLSFQ15[0] = max(NLSFQ15[0], n.NDeltaMinQ15[0])
 
 	for i := int32(1); i < L; i++ {
-		NLSFQ15[i] = i32max(NLSFQ15[i], NLSFQ15[i-1]+n.NDeltaMinQ15[i])
+		NLSFQ15[i] = max(NLSFQ15[i], NLSFQ15[i-1]+n.NDeltaMinQ15[i])
 	}
 
-	NLSFQ15[L-1] = i32min(NLSFQ15[L-1], (1<<15)-n.NDeltaMinQ15[L])
+	NLSFQ15[L-1] = min(NLSFQ15[L-1], (1<<15)-n.NDeltaMinQ15[L])
 
 	for i := L - 2; i >= 0; i-- {
-		NLSFQ15[i] = i32min(NLSFQ15[i], NLSFQ15[i+1]-n.NDeltaMinQ15[i+1])
+		NLSFQ15[i] = min(NLSFQ15[i], NLSFQ15[i+1]-n.NDeltaMinQ15[i+1])
 	}
 }
 
@@ -204,7 +204,7 @@ func _NLSF2A(a []int16, NLSF []int32, d int32) {
 	for i = 0; i < 10; i++ {
 		maxabs = 0
 		for k := int32(0); k < d; k++ {
-			absval = i32abs(aInt32[k])
+			absval = abs(aInt32[k])
 			if absval > maxabs {
 				maxabs = absval
 				idx = k
@@ -212,7 +212,7 @@ func _NLSF2A(a []int16, NLSF []int32, d int32) {
 		}
 
 		if maxabs > math.MaxInt16 {
-			maxabs = i32min(maxabs, 98369)
+			maxabs = min(maxabs, 98369)
 
 			scQ16 := 65470 - div(mul(65470>>2, maxabs-math.MaxInt16),
 				rshift(mul(maxabs, idx+1), 2))
@@ -242,5 +242,9 @@ func _NLSF2AStable(pARQ12 []int16, pNLSF []int32, LPCOrder int32) {
 		} else {
 			break
 		}
+	}
+
+	if i == MaxLPCStabilizeIterations {
+		panic(false)
 	}
 }

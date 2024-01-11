@@ -183,3 +183,40 @@ func _LPCSynthesisFilter(in, AQ12 []int16, GainQ26 int32, S []int32, out []int16
 		S[order-1] = lshiftSAT32(out32Q10, 4)
 	}
 }
+
+func _LPCInversePredGainQ24(invGainQ30 *int32, AQ24 []int32, order int32) int32 {
+	var k int32
+	var (
+		atmpQA [2][]int32
+		anewQA []int32
+	)
+
+	for i := 0; i < 2; i++ {
+		atmpQA[i] = make([]int32, MaxLPCOrder, MaxLPCOrder)
+	}
+
+	anewQA = atmpQA[order&1]
+
+	for k = 0; k < order; k++ {
+		anewQA[k] = rrshift(AQ24[k], 24-QA)
+	}
+
+	return _LPCInversePredGainQA(invGainQ30, atmpQA[:], order)
+}
+
+const (
+	FindLPCChirp   = 0.99995
+	FindLPCCondFAC = 2.5e-5
+)
+
+func findLPC(
+	NLSFQ15 []int32,
+	interpIndex *int32,
+	prevNLSFqQ15 []int32,
+	useInterpolatedNLSFs int32,
+	LPCorder int32,
+	x []int16,
+	subfrLength int32,
+) {
+
+}

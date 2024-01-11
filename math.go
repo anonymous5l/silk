@@ -9,13 +9,25 @@ func smlawb(a32, b32, c32 int32) int32 {
 	return a32 + ((b32 >> 16) * c32) + (((b32 & 0xffff) * c32) >> 16)
 }
 
+func smlalbb(a64 int64, b16, c16 int16) int64 {
+	return a64 + int64(int32(b16)*int32(c16))
+}
+
 func smulwb(a32, b32 int32) int32 {
 	b32 = int32(int16(b32))
 	return ((a32 >> 16) * b32) + (((a32 & 0xffff) * b32) >> 16)
 }
 
+func smulwt(a32, b32 int32) int32 {
+	return (a32>>16)*(b32>>16) + (((a32 & 0x0000FFFF) * (b32 >> 16)) >> 16)
+}
+
 func smlawt(a32, b32, c32 int32) int32 {
 	return a32 + ((b32 >> 16) * (c32 >> 16)) + (((b32 & 0xffff) * (c32 >> 16)) >> 16)
+}
+
+func smlabt(a32, b32, c32 int32) int32 {
+	return a32 + int32(int16(b32))*(c32>>16)
 }
 
 func smlabb(a32, b32, c32 int32) int32 {
@@ -101,7 +113,7 @@ func inverse32varQ(b32 int32, QRes int32) int32 {
 	assert(b32 != math.MinInt32)
 	assert(QRes > 0)
 
-	bHeadRM := clz32(i32abs(b32)) - 1
+	bHeadRM := clz32(abs(b32)) - 1
 	b32nRM := lshift(b32, bHeadRM)
 
 	b32Inv := (math.MaxInt32 >> 2) / rshift(b32nRM, 16)
@@ -161,25 +173,11 @@ func limit(a, limit1, limit2 int32) int32 {
 	return a
 }
 
-func i32min(a, b int32) int32 {
-	if a < b {
-		return a
+func abs(a int32) int32 {
+	if a < 0 {
+		return -a
 	}
-	return b
-}
-
-func i32max(a, b int32) int32 {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func i32abs(a int32) int32 {
-	if a > 0 {
-		return a
-	}
-	return -a
+	return a
 }
 
 func log2lin(inLogQ7 int32) int32 {
@@ -203,6 +201,14 @@ func log2lin(inLogQ7 int32) int32 {
 	return out
 }
 
+func lin2log(inLin int32) int32 {
+	var lz, fracQ7 int32
+
+	clzFrac(inLin, &lz, &fracQ7)
+
+	return lshift(31-lz, 7) + smlawb(fracQ7, mul(fracQ7, 128-fracQ7), 179)
+}
+
 func insertionSortIncreasingAllValues(a []int32, L int32) {
 	var i, j int
 	for i = 1; i < int(L); i++ {
@@ -218,9 +224,9 @@ func div32varQ(a32, b32, Qres int32) int32 {
 	assert(b32 != 0)
 	assert(Qres >= 0)
 
-	aHeadrm := clz32(i32abs(a32)) - 1
+	aHeadrm := clz32(abs(a32)) - 1
 	a32nrm := lshift(a32, aHeadrm)
-	bHeadrm := clz32(i32abs(b32)) - 1
+	bHeadrm := clz32(abs(b32)) - 1
 	b32nrm := lshift(b32, bHeadrm)
 
 	b32inv := (math.MaxInt32 >> 2) / rshift(b32nrm, 16)
@@ -255,7 +261,9 @@ func _MAPrediction(in []int16, B []int16, S []int32, out []int16, length int32, 
 		}
 		S[order-1] = smulbb(in16, int32(B[order-1]))
 
-		out[k] = sat16(out32)
+		if out != nil {
+			out[k] = sat16(out32)
+		}
 	}
 }
 
@@ -375,8 +383,7 @@ func u32mul(a, b uint32) uint32 {
 }
 
 func smulbb(a, b int32) int32 {
-	a, b = int32(int16(a)), int32(int16(b))
-	return a * b
+	return int32(int16(a)) * int32(int16(b))
 }
 
 func smull(a, b int32) int64 {
@@ -389,4 +396,229 @@ func div(a, b int32) int32 {
 
 func ua2i32(a []int16) int32 {
 	return (int32(a[1]) << 16) | (int32(a[0]) & 0xffff)
+}
+
+func gcd(a, b int32) int32 {
+	tmp := int32(0)
+	for b > 0 {
+		tmp = a - b*div(a, b)
+		a, b = b, tmp
+	}
+	return a
+}
+
+func fixConst(C float32, Q int32) int32 {
+	return int32((C * float32(1<<Q)) + 0.5)
+}
+
+func addPosSAT32(a, b int32) int32 {
+	ret := a + b
+	if int(ret)&0x80000000 > 0 {
+		return math.MaxInt32
+	}
+	return ret
+}
+
+func clz64(in int64) int32 {
+	var inUpper int32
+
+	inUpper = int32(in >> 32)
+	if inUpper == 0 {
+		return 32 + clz32(int32(in))
+	}
+
+	return clz32(inUpper)
+}
+
+func int16ArrayMaxABS(vec []int16) int16 {
+	var _max, i, lvl, ind int32
+
+	length := int32(len(vec))
+	if length == 0 {
+		return 0
+	}
+
+	ind = length - 1
+	_max = smulbb(int32(vec[ind]), int32(vec[ind]))
+
+	for i = length - 2; i >= 0; i-- {
+		lvl = smulbb(int32(vec[i]), int32(vec[i]))
+		if lvl > _max {
+			_max = lvl
+			ind = i
+		}
+	}
+
+	if _max >= 1073676289 {
+		return math.MaxInt16
+	} else {
+		if vec[ind] < 0 {
+			return -vec[ind]
+		} else {
+			return vec[ind]
+		}
+	}
+}
+
+func _PAnaFindScaling(signal []int16, signalLength, sumSqrLen int32) int32 {
+	var nbits, xMax int32
+
+	xMax = int32(int16ArrayMaxABS(signal[:signalLength]))
+
+	if xMax < math.MaxInt16 {
+		nbits = 32 - clz32(smulbb(xMax, xMax))
+	} else {
+		nbits = 30
+	}
+	nbits += int32(17 - clz16(uint16(sumSqrLen)))
+
+	if nbits < 31 {
+		return 0
+	}
+	return nbits - 30
+}
+
+const ScratchSize = 22
+
+func _PAnaCalcCorrSt3(crossCorrSt3 [][][]int32, signal []int16, startLag, sfLength, complexity int32) {
+	var (
+		targetPtr, basisPtr            []int16
+		crossCorr                      int32
+		i, j, k, lagCounter            int32
+		cbkOffset, cbkSize, delta, idx int32
+		scratchMem                     [ScratchSize]int32
+	)
+
+	assert(complexity >= PitchESTMinComplex)
+	assert(complexity <= PitchESTMaxComplex)
+
+	cbkOffset = int32(cbkOffsetsStage3[complexity])
+	cbkSize = int32(cbkSizesStage3[complexity])
+
+	off := lshift(sfLength, 2)
+
+	targetPtr = signal[off:]
+	for k = 0; k < PitchESTNBSubFR; k++ {
+		lagCounter = 0
+
+		for j = int32(LagRangeStage3[complexity][k][0]); j <= int32(LagRangeStage3[complexity][k][1]); j++ {
+			basisPtr = signal[off-(startLag+j)+(sfLength*k):]
+			crossCorr = innerProdAligned(targetPtr, basisPtr, sfLength)
+			assert(lagCounter < ScratchSize)
+			scratchMem[lagCounter] = crossCorr
+			lagCounter++
+		}
+
+		delta = int32(LagRangeStage3[complexity][k][0])
+		for i = cbkOffset; i < (cbkOffset + cbkSize); i++ {
+			idx = int32(CBLagsStage3[k][i]) - delta
+			for j = 0; j < PitchESTNBStage3Lags; j++ {
+				assert(idx+j < ScratchSize)
+				assert(idx+j < lagCounter)
+
+				crossCorrSt3[k][i][j] = scratchMem[idx+j]
+			}
+		}
+		targetPtr = targetPtr[sfLength:]
+	}
+}
+
+func _PAnaCalcEnergySt3(energiesSt3 [][][]int32, signal []int16, startLag, sfLength, complexity int32) {
+	var (
+		energy                         int32
+		targetPtr, basisPtr            []int16
+		k, i, j, lagCounter            int32
+		cbkOffset, cbkSize, delta, idx int32
+		scratchMem                     [ScratchSize]int32
+	)
+
+	cbkOffset = int32(cbkOffsetsStage3[complexity])
+	cbkSize = int32(cbkSizesStage3[complexity])
+
+	off := lshift(sfLength, 2)
+	targetPtr = signal[off:]
+	for k = 0; k < PitchESTNBSubFR; k++ {
+		lagCounter = 0
+
+		basisOff := off - (startLag + int32(LagRangeStage3[complexity][k][0])) + (sfLength * k)
+		basisPtr = signal[basisOff:]
+		energy = innerProdAligned(basisPtr, basisPtr, sfLength)
+		assert(energy >= 0)
+		scratchMem[lagCounter] = energy
+		lagCounter++
+
+		for i = 1; i < int32(LagRangeStage3[complexity][k][1])-int32(LagRangeStage3[complexity][k][0])+1; i++ {
+			energy -= smulbb(int32(basisPtr[sfLength-i]), int32(basisPtr[sfLength-i]))
+			assert(energy >= 0)
+
+			energy = addSAT32(energy, smulbb(int32(signal[basisOff-i]), int32(signal[basisOff-i])))
+			assert(energy >= 0)
+			assert(lagCounter < ScratchSize)
+
+			scratchMem[lagCounter] = energy
+			lagCounter++
+		}
+
+		delta = int32(LagRangeStage3[complexity][k][0])
+		for i = cbkOffset; i < cbkOffset+cbkSize; i++ {
+			idx = int32(CBLagsStage3[k][i]) - delta
+			for j = 0; j < PitchESTNBStage3Lags; j++ {
+				assert(idx+j < ScratchSize)
+				assert(idx+j < lagCounter)
+				energiesSt3[k][i][j] = scratchMem[idx+j]
+				assert(energiesSt3[k][i][j] >= 0)
+			}
+		}
+
+		targetPtr = targetPtr[sfLength:]
+	}
+}
+
+func insertionSortDecreasingInt16(a []int16, index []int32, L, K int32) {
+	var i, j, value int32
+	assert(K > 0)
+	assert(L > 0)
+	assert(L >= K)
+
+	for i = 0; i < K; i++ {
+		index[i] = i
+	}
+
+	for i = 1; i < K; i++ {
+		value = int32(a[i])
+		for j = i - 1; (j >= 0) && (value > int32(a[j])); j-- {
+			a[j+1] = a[j]
+			index[j+1] = index[j]
+		}
+		a[j+1] = int16(value)
+		index[j+1] = i
+	}
+
+	for i = K; i < L; i++ {
+		value = int32(a[i])
+		if value > int32(a[K-1]) {
+			for j = K - 2; (j >= 0) && (value > int32(a[j])); j-- {
+				a[j+1] = a[j]
+				index[j+1] = index[j]
+			}
+			a[j+1] = int16(value)
+			index[j+1] = i
+		}
+	}
+}
+
+func warpedGain(coefsQ24 []int32, lambdaQ16, order int32) int32 {
+	var i, gainQ24 int32
+
+	lambdaQ16 = -lambdaQ16
+	gainQ24 = coefsQ24[order-1]
+	for i = order - 2; i >= 0; i-- {
+		gainQ24 = smlawb(coefsQ24[i], gainQ24, lambdaQ16)
+	}
+	gainQ24 = smlawb(fixConst(1.0, 24), gainQ24, -lambdaQ16)
+	return inverse32varQ(gainQ24, 40)
+}
+
+func matrixPtr(row, column, N int32) int32 {
+	return row*N + column
 }

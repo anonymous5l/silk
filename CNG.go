@@ -1,18 +1,12 @@
 package silk
 
 type CNG struct {
-	excBufQ10   []int32
-	smthNLSFQ15 []int32
-	synthState  []int32
+	excBufQ10   [MaxFrameLength]int32
+	smthNLSFQ15 [MaxLPCOrder]int32
+	synthState  [MaxLPCOrder]int32
 	smthGainQ16 int32
 	randSeed    int32
 	fskHz       int32
-}
-
-func (c *CNG) init() {
-	c.excBufQ10 = make([]int32, MaxFrameLength, MaxFrameLength)
-	c.smthNLSFQ15 = make([]int32, MaxLPCOrder, MaxLPCOrder)
-	c.synthState = make([]int32, MaxLPCOrder, MaxLPCOrder)
 }
 
 func _CNGExc(residual []int16, excBufQ10 []int32, GainQ16 int32, length int32, randSeed *int32) {
@@ -32,22 +26,22 @@ func _CNGExc(residual []int16, excBufQ10 []int32, GainQ16 int32, length int32, r
 	*randSeed = seed
 }
 
-func (s *decoderState) CNG(psDecCtrl *decoderControl, signal []int16, length int32) (err error) {
+func (d *Decoder) _CNG(psDecCtrl *decoderControl, signal []int16, length int32) (err error) {
 	LPCBuf := make([]int16, MaxLPCOrder, MaxLPCOrder)
 	CNGSig := make([]int16, MaxFrameLength, MaxFrameLength)
 
 	var maxGainQ16, subfr int32
 
-	psCNG := s.sCNG
+	psCNG := &d.sCNG
 
-	if s.fskHz != psCNG.fskHz {
-		s.CNGReset()
-		psCNG.fskHz = s.fskHz
+	if d.fskHz != psCNG.fskHz {
+		d._CNGReset()
+		psCNG.fskHz = d.fskHz
 	}
 
-	if s.lossCnt == 0 && s.vadFlag == NoVoiceActivity {
-		for i := int32(0); i < s.LPCOrder; i++ {
-			psCNG.smthNLSFQ15[i] += smulwb(s.prevNLSFQ15[i]-psCNG.smthNLSFQ15[i], CNGNLSFSMTHQ16)
+	if d.lossCnt == 0 && d.vadFlag == NoVoiceActivity {
+		for i := int32(0); i < d._LPCOrder; i++ {
+			psCNG.smthNLSFQ15[i] += smulwb(d.prevNLSFQ15[i]-psCNG.smthNLSFQ15[i], CNGNLSFSMTHQ16)
 		}
 
 		maxGainQ16 = 0
@@ -60,31 +54,31 @@ func (s *decoderState) CNG(psDecCtrl *decoderControl, signal []int16, length int
 		}
 
 		// memmove
-		for i := int32(0); i < (NBSubFR-1)*s.subfrLength; i++ {
-			psCNG.excBufQ10[s.subfrLength+i] = psCNG.excBufQ10[i]
+		for i := int32(0); i < (NBSubFR-1)*d.subfrLength; i++ {
+			psCNG.excBufQ10[d.subfrLength+i] = psCNG.excBufQ10[i]
 		}
 
-		memcpy(psCNG.excBufQ10, psCNG.excBufQ10[(subfr*s.subfrLength):], int(s.subfrLength))
+		memcpy(psCNG.excBufQ10[:], psCNG.excBufQ10[(subfr*d.subfrLength):], int(d.subfrLength))
 
 		for i := int32(0); i < NBSubFR; i++ {
 			psCNG.smthGainQ16 += smulwb(psDecCtrl.GainsQ16[i]-psCNG.smthGainQ16, CNGGainSMTHQ16)
 		}
 	}
 
-	if s.lossCnt > 0 {
-		_CNGExc(CNGSig, psCNG.excBufQ10,
+	if d.lossCnt > 0 {
+		_CNGExc(CNGSig, psCNG.excBufQ10[:],
 			psCNG.smthGainQ16, length, &psCNG.randSeed)
 
-		_NLSF2AStable(LPCBuf, psCNG.smthNLSFQ15, s.LPCOrder)
+		_NLSF2AStable(LPCBuf, psCNG.smthNLSFQ15[:], d._LPCOrder)
 
 		GainQ26 := int32(1 << 26)
 
-		if s.LPCOrder == 16 {
+		if d._LPCOrder == 16 {
 			_LPCSynthesisOrder16(CNGSig, LPCBuf,
-				GainQ26, psCNG.synthState, CNGSig, length)
+				GainQ26, psCNG.synthState[:], CNGSig, length)
 		} else {
 			_LPCSynthesisFilter(CNGSig, LPCBuf,
-				GainQ26, psCNG.synthState, CNGSig, length, s.LPCOrder)
+				GainQ26, psCNG.synthState[:], CNGSig, length, d._LPCOrder)
 		}
 
 		for i := int32(0); i < length; i++ {
@@ -92,7 +86,7 @@ func (s *decoderState) CNG(psDecCtrl *decoderControl, signal []int16, length int
 			signal[i] = sat16(tmp32)
 		}
 	} else {
-		memset(psCNG.synthState, 0, int(s.LPCOrder))
+		memset(psCNG.synthState[:], 0, int(d._LPCOrder))
 	}
 
 	return
