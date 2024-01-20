@@ -1,93 +1,107 @@
 package silk
 
-type CNG struct {
-	excBufQ10   [MaxFrameLength]int32
-	smthNLSFQ15 [MaxLPCOrder]int32
-	synthState  [MaxLPCOrder]int32
-	smthGainQ16 int32
-	randSeed    int32
-	fskHz       int32
+import "math"
+
+func CNG_exc(residual *slice[int16], exc_buf_Q10 *slice[int32], Gain_Q16 int32, length int32, rand_seed *int32) {
+	var (
+		seed        int32
+		i, exc_mask int32
+	)
+
+	exc_mask = CNG_BUF_MASK_MAX
+	for exc_mask > length {
+		exc_mask = RSHIFT(exc_mask, 1)
+	}
+
+	seed = *rand_seed
+	for i = 0; i < length; i++ {
+		seed = RAND(seed)
+		idx := int(RSHIFT(seed, 24) & exc_mask)
+		*residual.ptr(int(i)) = int16(SAT16(RSHIFT_ROUND(SMULWW(exc_buf_Q10.idx(idx), Gain_Q16), 10)))
+	}
+	*rand_seed = seed
 }
 
-func _CNGExc(residual []int16, excBufQ10 []int32, GainQ16 int32, length int32, randSeed *int32) {
-	excMask := int32(CNGBufMaskMax)
-	for excMask > length {
-		excMask = excMask >> 1
-	}
+func CNG_Reset(psDec *decoder_state) {
+	var i, NLSF_step_Q15, NLSF_acc_Q15 int32
 
-	seed := *randSeed
-	for i := int32(0); i < length; i++ {
-		seed = rand(seed)
-		idx := rshift(seed, 24) & excMask
-		assert(idx >= 0)
-		assert(idx <= CNGBufMaskMax)
-		residual[i] = sat16(rrshift(smulww(excBufQ10[idx], GainQ16), 10))
+	psDec.sCNG = &CNG_struct{}
+	psDec.sCNG.init()
+
+	NLSF_step_Q15 = DIV32_16(math.MaxInt16, int16(psDec.LPC_order+1))
+	NLSF_acc_Q15 = 0
+	for i = 0; i < psDec.LPC_order; i++ {
+		NLSF_acc_Q15 += NLSF_step_Q15
+		*psDec.sCNG.CNG_smth_NLSF_Q15.ptr(int(i)) = NLSF_acc_Q15
 	}
-	*randSeed = seed
+	psDec.sCNG.CNG_smth_Gain_Q16 = 0
+	psDec.sCNG.rand_seed = 3176576
 }
 
-func (d *Decoder) _CNG(psDecCtrl *decoderControl, signal []int16, length int32) (err error) {
-	LPCBuf := make([]int16, MaxLPCOrder, MaxLPCOrder)
-	CNGSig := make([]int16, MaxFrameLength, MaxFrameLength)
+func CNG(psDec *decoder_state, psDecCtrl *decoder_control, signal *slice[int16], length int32) {
+	var (
+		i, subfr                       int32
+		tmp_32, Gain_Q26, max_Gain_Q16 int32
+		LPC_buf                        = alloc[int16](MAX_LPC_ORDER)
+		CNG_sig                        = alloc[int16](MAX_FRAME_LENGTH)
+		psCNG                          *CNG_struct
+	)
 
-	var maxGainQ16, subfr int32
+	psCNG = psDec.sCNG
 
-	psCNG := &d.sCNG
-
-	if d.fskHz != psCNG.fskHz {
-		d._CNGReset()
-		psCNG.fskHz = d.fskHz
+	if psDec.fs_kHz != psCNG.fs_kHz {
+		CNG_Reset(psDec)
+		psCNG.fs_kHz = psDec.fs_kHz
 	}
 
-	if d.lossCnt == 0 && d.vadFlag == NoVoiceActivity {
-		for i := int32(0); i < d._LPCOrder; i++ {
-			psCNG.smthNLSFQ15[i] += smulwb(d.prevNLSFQ15[i]-psCNG.smthNLSFQ15[i], CNGNLSFSMTHQ16)
+	if psDec.lossCnt == 0 && psDec.vadFlag == NO_VOICE_ACTIVITY {
+		for i = 0; i < psDec.LPC_order; i++ {
+			*psCNG.CNG_smth_NLSF_Q15.ptr(int(i)) += SMULWB(
+				psDec.prevNLSF_Q15.idx(int(i))-
+					psCNG.CNG_smth_NLSF_Q15.idx(int(i)), CNG_NLSF_SMTH_Q16)
 		}
 
-		maxGainQ16 = 0
+		max_Gain_Q16 = 0
 		subfr = 0
-		for i := int32(0); i < NBSubFR; i++ {
-			if psDecCtrl.GainsQ16[i] > maxGainQ16 {
-				maxGainQ16 = psDecCtrl.GainsQ16[i]
+		for i = 0; i < NB_SUBFR; i++ {
+			if psDecCtrl.Gains_Q16.idx(int(i)) > max_Gain_Q16 {
+				max_Gain_Q16 = psDecCtrl.Gains_Q16.idx(int(i))
 				subfr = i
 			}
 		}
 
-		// memmove
-		for i := int32(0); i < (NBSubFR-1)*d.subfrLength; i++ {
-			psCNG.excBufQ10[d.subfrLength+i] = psCNG.excBufQ10[i]
-		}
+		psCNG.CNG_exc_buf_Q10.copy(psCNG.CNG_exc_buf_Q10.off(int(psDec.subfr_length)),
+			int((NB_SUBFR-1)*psDec.subfr_length))
+		psDec.exc_Q10.off(int(subfr*psDec.subfr_length)).copy(psCNG.CNG_exc_buf_Q10,
+			int(psDec.subfr_length))
 
-		memcpy(psCNG.excBufQ10[:], psCNG.excBufQ10[(subfr*d.subfrLength):], int(d.subfrLength))
-
-		for i := int32(0); i < NBSubFR; i++ {
-			psCNG.smthGainQ16 += smulwb(psDecCtrl.GainsQ16[i]-psCNG.smthGainQ16, CNGGainSMTHQ16)
+		for i = 0; i < NB_SUBFR; i++ {
+			psCNG.CNG_smth_Gain_Q16 += SMULWB(psDecCtrl.Gains_Q16.idx(int(i))-psCNG.CNG_smth_Gain_Q16, CNG_GAIN_SMTH_Q16)
 		}
 	}
 
-	if d.lossCnt > 0 {
-		_CNGExc(CNGSig, psCNG.excBufQ10[:],
-			psCNG.smthGainQ16, length, &psCNG.randSeed)
+	if psDec.lossCnt != 0 {
 
-		_NLSF2AStable(LPCBuf, psCNG.smthNLSFQ15[:], d._LPCOrder)
+		CNG_exc(CNG_sig, psCNG.CNG_exc_buf_Q10,
+			psCNG.CNG_smth_Gain_Q16, length, &psCNG.rand_seed)
 
-		GainQ26 := int32(1 << 26)
+		NLSF2A_stable(LPC_buf, psCNG.CNG_smth_NLSF_Q15, psDec.LPC_order)
 
-		if d._LPCOrder == 16 {
-			_LPCSynthesisOrder16(CNGSig, LPCBuf,
-				GainQ26, psCNG.synthState[:], CNGSig, length)
+		Gain_Q26 = 1 << 26
+
+		if psDec.LPC_order == 16 {
+			LPC_synthesis_order16(CNG_sig, LPC_buf,
+				Gain_Q26, psCNG.CNG_synth_state, CNG_sig, length)
 		} else {
-			_LPCSynthesisFilter(CNGSig, LPCBuf,
-				GainQ26, psCNG.synthState[:], CNGSig, length, d._LPCOrder)
+			LPC_synthesis_filter(CNG_sig, LPC_buf,
+				Gain_Q26, psCNG.CNG_synth_state, CNG_sig, length, psDec.LPC_order)
 		}
 
-		for i := int32(0); i < length; i++ {
-			tmp32 := int32(signal[i] + CNGSig[i])
-			signal[i] = sat16(tmp32)
+		for i = 0; i < length; i++ {
+			tmp_32 = int32(signal.idx(int(i)) + CNG_sig.idx(int(i)))
+			*signal.ptr(int(i)) = int16(SAT16(tmp_32))
 		}
 	} else {
-		memset(psCNG.synthState[:], 0, int(d._LPCOrder))
+		memset(psCNG.CNG_synth_state, 0, int(psDec.LPC_order))
 	}
-
-	return
 }

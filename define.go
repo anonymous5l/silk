@@ -1,288 +1,185 @@
 package silk
 
 const (
-	MaxArithmBytes = 1024
+	MIN_TARGET_RATE_BPS = 5000
+	MAX_TARGET_RATE_BPS = 100000
 
-	NBSubFR = 4
+	SWB2WB_BITRATE_BPS = 25000
+	WB2SWB_BITRATE_BPS = 30000
+	WB2MB_BITRATE_BPS  = 14000
+	MB2WB_BITRATE_BPS  = 18000
+	MB2NB_BITRATE_BPS  = 10000
+	NB2MB_BITRATE_BPS  = 14000
 
-	MinLPCOrder = 10
-	MaxLPCOrder = 16
+	ACCUM_BITS_DIFF_THRESHOLD = 30000000
+	TARGET_RATE_TAB_SZ        = 8
 
-	LOG2INVLPCGainHighThres = 3
-	LOG2INVLPCGainLowThres  = 8
+	NO_SPEECH_FRAMES_BEFORE_DTX = 5
+	MAX_CONSECUTIVE_DTX         = 20
 
-	MinDeltaGainQuant = -4
+	USE_LBRR = 1
 
-	NLSFMSVQMaxCBStages = 10
+	NO_LBRR_THRES = 10
 
-	MinQGainDB   = 6
-	MaxQGainDB   = 86
-	NLevelsQGain = 64
+	MAX_LBRR_DELAY = 2
+	LBRR_IDX_MASK  = 1
 
-	MaxFSkHz         = 24
-	MaxInputFrames   = 5
-	MaxBytesPerFrame = 1024
+	INBAND_FEC_MIN_RATE_BPS = 18000
+	LBRR_LOSS_THRES         = 1
 
-	FrameLengthMS  = 20
-	MaxFrameLength = FrameLengthMS * MaxFSkHz
+	NO_LBRR           = 0
+	ADD_LBRR_TO_PLUS1 = 1
+	ADD_LBRR_TO_PLUS2 = 2
 
-	BWEAfterLossQ16 = 63570
-	BWECOEFQ16
+	LAST_FRAME  = 0
+	MORE_FRAMES = 1
+	LBRR_VER1   = 2
+	LBRR_VER2   = 3
+	EXT_LAYER   = 4
 
-	RandBufSize = 128
-	RandBufMask = RandBufSize - 1
+	NB_SOS                           = 3
+	HP_8_KHZ_THRES                   = 10
+	CONCEC_SWB_SMPLS_THRES           = 480 * 15
+	WB_DETECT_ACTIVE_SPEECH_MS_THRES = 15000
 
-	PitchDriftFACQ16 = 655
+	LOW_COMPLEXITY_ONLY = 0
 
-	MaxPitchLagMS = 18
+	SWITCH_TRANSITION_FILTERING = 1
 
-	NBATT = 2
+	DEC_HP_ORDER = 2
 
-	SIGTypeVoiced   = 0
-	SIGTypeUnvoiced = 1
+	MAX_FS_KHZ     = 24
+	MAX_API_FS_KHZ = 48
 
-	ShellCodecFrameLength = 16
-	MaxNBShellBlocks      = MaxFrameLength / ShellCodecFrameLength
+	SIG_TYPE_VOICED   = 0
+	SIG_TYPE_UNVOICED = 1
 
-	NRateLevels = 10
+	NO_VOICE_ACTIVITY = 0
+	VOICE_ACTIVITY    = 1
 
-	OffsetVLQ10  = 32
-	OffsetVHQ10  = 100
-	OffsetUVLQ10 = 100
-	OffsetUVHQ10 = 256
+	FRAME_LENGTH_MS  = 20
+	MAX_FRAME_LENGTH = (FRAME_LENGTH_MS * MAX_FS_KHZ)
 
-	MaxPulses = 18
-	MaxLoops  = 20
+	LA_PITCH_MS  = 2
+	LA_PITCH_MAX = (LA_PITCH_MS * MAX_FS_KHZ)
 
-	LSFCosTabSZFix            = 128
-	MaxLPCStabilizeIterations = 20
-	LTPOrder                  = 5
+	FIND_PITCH_LPC_WIN_MS  = (20 + (LA_PITCH_MS << 1))
+	FIND_PITCH_LPC_WIN_MAX = (FIND_PITCH_LPC_WIN_MS * MAX_FS_KHZ)
 
-	DecHPOrder = 2
+	MAX_FIND_PITCH_LPC_ORDER = 16
 
-	VPitchGainStartMinQ14 = 11469
-	VPitchGainStartMaxQ14 = 15565
+	PITCH_EST_COMPLEXITY_HC_MODE = PITCH_EST_MAX_COMPLEX
+	PITCH_EST_COMPLEXITY_MC_MODE = PITCH_EST_MID_COMPLEX
+	PITCH_EST_COMPLEXITY_LC_MODE = PITCH_EST_MIN_COMPLEX
 
-	NoVoiceActivity = 0
-	VoiceActivity   = 1
+	LA_SHAPE_MS  = 5
+	LA_SHAPE_MAX = (LA_SHAPE_MS * MAX_FS_KHZ)
 
-	CNGBufMaskMax  = 255
-	CNGGainSMTHQ16 = 4634
-	CNGNLSFSMTHQ16 = 16348
+	SHAPE_LPC_WIN_MAX = (15 * MAX_FS_KHZ)
 
-	MaxApiFSKHZ = 48
+	MAX_ARITHM_BYTES = 1024
 
-	MoreFrames   = 1
-	LastFrame    = 0
-	NoLBRRRhres  = 10
-	LBRRVer1     = 2
-	LBRRVer2     = 3
-	MaxLBRRDelay = 2
+	RANGE_CODER_WRITE_BEYOND_BUFFER   = -1
+	RANGE_CODER_CDF_OUT_OF_RANGE      = -2
+	RANGE_CODER_NORMALIZATION_FAILED  = -3
+	RANGE_CODER_ZERO_INTERVAL_WIDTH   = -4
+	RANGE_CODER_DECODER_CHECK_FAILED  = -5
+	RANGE_CODER_READ_BEYOND_BUFFER    = -6
+	RANGE_CODER_ILLEGAL_SAMPLING_RATE = -7
+	RANGE_CODER_DEC_PAYLOAD_TOO_LONG  = -8
 
-	LAShapeMS  = 5
-	LAShapeMax = LAShapeMS * MaxFSkHz
+	MIN_QGAIN_DB = 6
 
-	NBSOS                       = 3
-	HP8kHzThres                 = 10
-	ConcecSWBSmplsThres         = 480 * 15
-	WBDetectActiveSpeechMSThres = 15000
+	MAX_QGAIN_DB = 86
 
-	DecisionDelay     = 32
-	DecisionDelayMask = DecisionDelay - 1
+	N_LEVELS_QGAIN = 64
 
-	NSQLPCBufLength = DecisionDelay
+	MAX_DELTA_GAIN_QUANT = 40
 
-	LTPBufLength = 512
-	LTPMask      = LTPBufLength - 1
+	MIN_DELTA_GAIN_QUANT = -4
 
-	MaxShapeLPCOrder = 16
+	OFFSET_VL_Q10  = 32
+	OFFSET_VH_Q10  = 100
+	OFFSET_UVL_Q10 = 100
+	OFFSET_UVH_Q10 = 256
 
-	VADNBands = 4
+	MAX_LPC_STABILIZE_ITERATIONS = 20
 
-	VADInternalSubFramesLog2 = 2
-	VADInternalSubFrames     = 1 << VADInternalSubFramesLog2
+	MAX_LPC_ORDER = 16
+	MIN_LPC_ORDER = 10
 
-	VADNoiseLevelSmoothCOEFQ16 = 1024
-	VADNoiseLevelBIAS          = 50
+	LTP_ORDER = 5
 
-	VADNegativeOffsetQ5 = 128
-	VADSNRFactorQ16     = 45000
-	VADSNRSmoothCOEFQ18 = 4096
+	NB_LTP_CBKS = 3
 
-	AccumBitsDiffThreshold = 30000000
-	TargetRateTabSZ        = 8
+	NB_SUBFR = 4
 
-	NoLBRR         = 0
-	AddLBRRToPlus1 = 1
-	AddLBRRToPlus2 = 2
+	MAX_SHAPE_LPC_ORDER = 16
 
-	LAPitchMS  = 2
-	LAPitchMax = LAPitchMS * MaxFSkHz
+	HARM_SHAPE_FIR_TAPS = 3
 
-	FindPitchLPCWINMS  = 20 + (LAPitchMS << 1)
-	FindPitchLPCWINMax = FindPitchLPCWINMS * MaxFSkHz
+	MAX_DEL_DEC_STATES = 4
 
-	MULTPQuantNB  = 0.03
-	MULTPQuantMB  = 0.025
-	MULTPQuantWB  = 0.02
-	MULTPQuantSWB = 0.016
-
-	PitchESTShortLAGBIASQ15    = 6554
-	PitchESTPrevLAGBIASQ15     = 6554
-	PitchESTFlatContourBIASQ20 = 52429
-
-	PitchESTMinComplex = 0
-	PitchESTMidComplex = 1
-	PitchESTMaxComplex = 2
-
-	PitchESTComplexityHCMode = PitchESTMaxComplex
-	PitchESTComplexityMCMode = PitchESTMidComplex
-	PitchESTComplexityLCMode = PitchESTMinComplex
-
-	FindPitchWhiteNoiseFraction         = 1e-3
-	FindPitchBandWithExpansion          = 0.99
-	FindPitchCorrelationThresholdHCMode = 0.7
-	FindPitchCorrelationThresholdMCMode = 0.75
-	FindPitchCorrelationThresholdLCMode = 0.8
-
-	NLSFMSVQFluctuationReduction = 1
-	MaxNLSFMSVQSurvivors         = 16
-	MaxNLSFMSVQSurvivorsLCMode   = 2
-	MaxNLSFMSVQSurvivorsMCMode   = 4
-
-	WarpingMultiplier = 0.015
-
-	MaxDELDECStates = 4
-
-	MaxFindPitchLPCOrder = 16
-
-	ShapeLPCWINMax = 15 * MaxFSkHz
-
-	InBandFECMinRateBPS = 18000
-	LBRRLossThres       = 1
-)
-
-const (
-	PitchESTNBSubFR = 4
-
-	PitchESTMaxFSKHZ = 24
-
-	PitchESTFrameLengthMS = 40
-
-	PitchESTMaxFrameLength    = PitchESTFrameLengthMS * PitchESTMaxFSKHZ
-	PitchESTMaxFrameLengthST1 = PitchESTMaxFrameLength >> 2
-	PitchESTMaxFrameLengthST2 = PitchESTMaxFrameLength >> 1
-
-	PitchESTMaxLagMS = 18
-	PitchESTMinLagMS = 2
-	PitchESTMaxLag   = PitchESTMaxLagMS * PitchESTMaxFSKHZ
-	PitchESTMinLag   = PitchESTMinLagMS * PitchESTMaxFSKHZ
-
-	PitchESTDSRCHLength = 24
-
-	PitchESTMaxDecimateStateLength = 7
-
-	PitchESTNBStage3Lags = 5
-
-	PitchESTNBCBKSStage2    = 3
-	PitchESTNBCBKSStage2Ext = 11
-
-	PitchESTCBmn2 = 1
-	PitchESTCBmx2 = 2
-
-	PitchESTNBCBKSStage3Max = 34
-	PitchESTNBCBKSStage3Mid = 24
-	PitchESTNBCBKSStage3Min = 16
-)
-
-const (
-	TransitionTimeUpMS     = 5120
-	TransitionTimeDownMS   = 2560
-	TransitionNB           = 3
-	TransitionNA           = 2
-	TransitionIntNum       = 5
-	TransitionFramesUp     = TransitionTimeUpMS / FrameLengthMS
-	TransitionFramesDown   = TransitionTimeDownMS / FrameLengthMS
-	TransitionIntStepsUp   = TransitionFramesUp / (TransitionIntNum - 1)
-	TransitionIntStepsDown = TransitionFramesDown / (TransitionIntNum - 1)
-)
-
-var (
-	MagicV3 = []byte{
-		0x02, 0x23, 0x21, 0x53,
-		0x49, 0x4C, 0x4B, 0x5F,
-		0x56, 0x33,
-	}
-)
-
-const (
-	KHz8000   = 8000
-	KHz12000  = 12000
-	KHz16000  = 16000
-	KHz24000  = 24000
-	KHz32000  = 32000
-	KHz44100  = 44100
-	KHz48000  = 48000
-	KHz96000  = 96000
-	KHz192000 = 192000
-)
-
-const (
-	SWB2WBBitrateBPS = 25000
-	WB2SWBBitrateBPS = 30000
-	WB2MBBitrateBPS  = 14000
-	MB2WBBitrateBPS  = 18000
-	MB2NBBitrateBPS  = 10000
-	NB2MBBitrateBPS  = 14000
-)
-
-const (
-	MinTargetRateBPS = 5000
-	MaxTargetRateBPS = 100000
-)
-
-const (
-	VariableHPSMTHCoef1 = 0.1
-	VariableHPSMTHCoef2 = 0.015
-
-	VariableHPMinFREQ = 80.0
-	VariableHPMaxFREQ = 150.0
-
-	VariableHPMaxDeltaFREQ = 0.4
-)
-
-const (
-	BGSNRDECRdB                      = 4.0
-	HarmSNRINCRdB                    = 2.0
-	LBRRSpeechActivityThres          = 0.5
-	SparsenessThresholdQNTOffset     = 0.75
-	SparseSNRINCRdB                  = 2.0
-	BandWidthExpansion               = 0.95
-	LowRateBandWidthExpansionDelta   = 0.01
-	ShapeWhiteNoiseFraction          = 1e-5
-	NoiseFloordB                     = 4.0
-	RelativeMinGaindB                = -50.0
-	GainSmoothingCoef                = 1e-3
-	InputTilt                        = 0.05
-	HighRateInputTilt                = 0.1
-	DEESSERCoefSWBdB                 = 2.0
-	DEESSERCoefWBdB                  = 2.0
-	LowFreqShaping                   = 3.0
-	LowQualityLowFreqShapingDECR     = 0.5
-	HPNoiseCoef                      = 0.3
-	HarmHPNoiseCoef                  = 0.35
-	LowRateHarmonicBoost             = 0.1
-	LowInputQualityHarmonicBoost     = 0.1
-	HighRateOrLowRateHarmonicShaping = 0.2
-	HarmonicShaping                  = 0.3
-	SubFRSmthCoef                    = 0.4
-
-	HarmShapeFIRTaps = 3
-	LTPCorrsHeadRoom = 2
-	LTPDAMping       = 0.03
-	LTPSmoothing     = 0.1
-	FindLTPCondFac   = 1e-5
-
-	LTPGainMiddleAvgRDQ14 = 11010
-	NBThresholds          = 11
+	LTP_BUF_LENGTH = 512
+	LTP_MASK       = (LTP_BUF_LENGTH - 1)
+
+	DECISION_DELAY      = 32
+	DECISION_DELAY_MASK = (DECISION_DELAY - 1)
+
+	SHELL_CODEC_FRAME_LENGTH = 16
+	MAX_NB_SHELL_BLOCKS      = (MAX_FRAME_LENGTH / SHELL_CODEC_FRAME_LENGTH)
+
+	N_RATE_LEVELS = 10
+
+	MAX_PULSES = 18
+
+	MAX_MATRIX_SIZE = MAX_LPC_ORDER
+
+	NSQ_LPC_BUF_LENGTH = DECISION_DELAY
+
+	HIGH_PASS_INPUT = 1
+
+	VAD_N_BANDS = 4
+
+	VAD_INTERNAL_SUBFRAMES_LOG2 = 2
+	VAD_INTERNAL_SUBFRAMES      = (1 << VAD_INTERNAL_SUBFRAMES_LOG2)
+
+	VAD_NOISE_LEVEL_SMOOTH_COEF_Q16 = 1024
+	VAD_NOISE_LEVELS_BIAS           = 50
+
+	VAD_NEGATIVE_OFFSET_Q5 = 128
+	VAD_SNR_FACTOR_Q16     = 45000
+
+	VAD_SNR_SMOOTH_COEF_Q18 = 4096
+
+	NLSF_MSVQ_MAX_CB_STAGES                   = 10
+	NLSF_MSVQ_MAX_VECTORS_IN_STAGE            = 128
+	NLSF_MSVQ_MAX_VECTORS_IN_STAGE_TWO_TO_END = 16
+
+	NLSF_MSVQ_FLUCTUATION_REDUCTION = 1
+	MAX_NLSF_MSVQ_SURVIVORS         = 16
+	MAX_NLSF_MSVQ_SURVIVORS_LC_MODE = 2
+	MAX_NLSF_MSVQ_SURVIVORS_MC_MODE = 4
+
+	NLSF_MSVQ_TREE_SEARCH_MAX_VECTORS_EVALUATED_LC_MODE = NLSF_MSVQ_MAX_VECTORS_IN_STAGE
+
+	NLSF_MSVQ_TREE_SEARCH_MAX_VECTORS_EVALUATED = MAX_NLSF_MSVQ_SURVIVORS * NLSF_MSVQ_MAX_VECTORS_IN_STAGE_TWO_TO_END
+
+	NLSF_MSVQ_SURV_MAX_REL_RD = 0.1
+
+	TRANSITION_TIME_UP_MS     = 5120
+	TRANSITION_TIME_DOWN_MS   = 2560
+	TRANSITION_NB             = 3
+	TRANSITION_NA             = 2
+	TRANSITION_INT_NUM        = 5
+	TRANSITION_FRAMES_UP      = (TRANSITION_TIME_UP_MS / FRAME_LENGTH_MS)
+	TRANSITION_FRAMES_DOWN    = (TRANSITION_TIME_DOWN_MS / FRAME_LENGTH_MS)
+	TRANSITION_INT_STEPS_UP   = (TRANSITION_FRAMES_UP / (TRANSITION_INT_NUM - 1))
+	TRANSITION_INT_STEPS_DOWN = (TRANSITION_FRAMES_DOWN / (TRANSITION_INT_NUM - 1))
+
+	BWE_AFTER_LOSS_Q16 = 63570
+
+	CNG_BUF_MASK_MAX  = 255
+	CNG_GAIN_SMTH_Q16 = 4634
+	CNG_NLSF_SMTH_Q16 = 16348
 )
